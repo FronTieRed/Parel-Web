@@ -1,98 +1,106 @@
 import './style.css';
 import { Clerk } from '@clerk/clerk-js';
 
+// --- NOTIFICATION SYSTEM ---
+function showNotification(message, type = 'success') {
+    let container = document.getElementById('notification-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'notification-container';
+        document.body.appendChild(container);
+    }
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    const icon = type === 'success' ? '✓' : '✖';
+    notification.innerHTML = `<span class="notification-icon">${icon}</span> <div>${message}</div>`;
+    container.appendChild(notification);
+    setTimeout(() => { notification.classList.add('show'); }, 10);
+    setTimeout(() => {
+        notification.classList.remove('show');
+        notification.addEventListener('transitionend', () => notification.remove());
+    }, 5000);
+}
+
 // --- CONFIGURATION & DOM ELEMENTS ---
 const API_URL = import.meta.env.VITE_API_URL;
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
-
 const appDiv = document.querySelector('#app');
 const authDiv = document.querySelector('#auth-section');
 
 if (!CLERK_PUBLISHABLE_KEY) {
-    throw new Error("Missing Clerk Publishable Key. Please set VITE_CLERK_PUBLISHABLE_KEY in .env.local");
+    throw new Error("Missing Clerk Publishable Key in .env.local");
 }
 const clerk = new Clerk(CLERK_PUBLISHABLE_KEY);
 
-// --- API HELPER (NOW WITH AUTH TOKEN) ---
-async function fetchFromApi(endpoint) {
-    const token = await clerk.session.getToken();
-    const response = await fetch(`${API_URL}${endpoint}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: `API responded with status ${response.status}` }));
-        throw new Error(errorData.error || `An unknown API error occurred.`);
+// --- GLOBAL STATE & ROUTER ---
+let currentPath = window.location.pathname;
+
+// --- API HELPER ---
+async function fetchFromApi(endpoint, options = {}) {
+    const token = await clerk.session?.getToken();
+    if (!token) {
+        showNotification("Authentication error. Please sign in again.", "error");
+        return null;
     }
-    return response.json();
+    try {
+        const response = await fetch(`${API_URL}${endpoint}`, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            ...options
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: `API responded with status ${response.status}` }));
+            throw new Error(errorData.error || `An unknown API error occurred.`);
+        }
+        return response.json();
+    } catch (error) {
+        console.error("API Fetch Error:", error);
+        showNotification(error.message, "error");
+        return null;
+    }
 }
 
-// --- UI RENDERING FUNCTIONS ---
-function renderSignedInUI(user) {
-    const userMenuContainer = document.createElement('div');
-    userMenuContainer.id = 'user-menu-container';
-
-    const userButton = document.createElement('button');
-    userButton.id = 'user-menu-button';
-    userButton.innerHTML = `<img src="${user.imageUrl}" alt="${user.fullName || 'User menu'}">`;
-
-    const dropdown = document.createElement('div');
-    dropdown.id = 'user-menu-dropdown';
-    dropdown.innerHTML = `
-        <button id="profile-btn">Manage Account</button>
-        <button id="signout-btn">Sign Out</button>
-    `;
-
-    userMenuContainer.appendChild(userButton);
-    userMenuContainer.appendChild(dropdown);
-    authDiv.innerHTML = '';
-    authDiv.appendChild(userMenuContainer);
-
-    // Event Listeners for the dropdown
-    userButton.addEventListener('click', (e) => {
-        e.stopPropagation();
-        dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
-    });
-
-    document.getElementById('profile-btn').addEventListener('click', () => clerk.openUserProfile());
-    document.getElementById('signout-btn').addEventListener('click', () => clerk.signOut());
-}
-
-function renderSignedOutUI() {
-    const signInButton = document.createElement('button');
-    signInButton.id = 'signin-btn';
-    signInButton.className = 'revision-btn';
-    signInButton.textContent = 'Sign In / Sign Up';
-    signInButton.addEventListener('click', () => clerk.openSignIn());
-
-    authDiv.innerHTML = '';
-    authDiv.appendChild(signInButton);
-    appDiv.innerHTML = '<h2>Welcome to the Parel Agency Portal.</h2><p>Please sign in to continue.</p>';
-}
-
-
-async function handleRouteChange() {
-    const path = window.location.pathname;
-    appDiv.innerHTML = `<p><i>Loading...</i></p>`;
-    if (path.startsWith('/project/')) {
-        const projectId = path.split('/')[2];
-        await renderProjectDetailPage(projectId);
+// --- UI & PAGE RENDERERS ---
+function renderAuthUI(user) {
+    if (user) {
+        authDiv.innerHTML = `
+            <div id="user-menu-container">
+                <button id="user-menu-button"><img src="${user.imageUrl}" alt="${user.fullName || 'User menu'}"></button>
+                <div id="user-menu-dropdown" style="display: none;">
+                    <button id="profile-btn">Manage Account</button>
+                    <button id="signout-btn">Sign Out</button>
+                </div>
+            </div>`;
+        document.getElementById('user-menu-button').addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.getElementById('user-menu-dropdown').style.display = 'block';
+        });
+        document.getElementById('profile-btn').addEventListener('click', () => clerk.openUserProfile());
+        document.getElementById('signout-btn').addEventListener('click', () => clerk.signOut());
     } else {
-        await renderProjectListPage();
+        authDiv.innerHTML = `<button id="signin-btn" class="action-btn">Sign In</button>`;
+        document.getElementById('signin-btn').addEventListener('click', () => clerk.openSignIn());
     }
 }
 
 async function renderProjectListPage() {
     try {
         const projects = await fetchFromApi('/projects');
-        let projectsHtml = '<h2>My Projects</h2>';
+        if (projects === null) {
+            appDiv.innerHTML = `<h2>Error</h2><p>Could not load projects. Your session might have expired.</p>`;
+            return;
+        }
+        let projectsHtml = `
+            <div class="page-header">
+                <h2>My Projects</h2>
+                <a href="/new-project" class="action-btn">+ Create New Project</a>
+            </div>`;
         if (projects.length === 0) {
             projectsHtml += '<p>You have not been associated with any projects yet.</p>';
         } else {
             projectsHtml += projects.map(p => `
-                <div class="asset">
-                    <div class="asset-title"><a href="/project/${p.id}">${p.name}</a></div>
-                    <div><strong>ID:</strong> <code>${p.id}</code></div>
-                    <div><strong>Status:</strong> ${p.status}</div>
+                <div class="project-card">
+                    <h3 class="project-card-title"><a href="/project/${p.id}">${p.name}</a></h3>
+                    <p><strong>Status:</strong> ${p.status}</p>
                 </div>
             `).join('');
         }
@@ -102,94 +110,122 @@ async function renderProjectListPage() {
     }
 }
 
+function renderNewProjectForm() {
+    appDiv.innerHTML = `
+        <p><a href="/">&larr; Back to Project Dashboard</a></p>
+        <h2>Start a New "Brand-in-a-Box" Project</h2>
+        <form id="new-project-form">
+            <div class="form-group"><label for="projectName">Project / Company Name</label><input type="text" id="projectName" required placeholder="e.g., BioScan App Launch"></div>
+            <div class="form-group"><label for="targetAudience">Describe your Target Audience</label><textarea id="targetAudience" rows="4" required placeholder="e.g., Young professionals..."></textarea></div>
+            <div class="form-group"><label for="coreValues">What are the Core Values of your brand?</label><textarea id="coreValues" rows="4" required placeholder="e.g., Innovation, Community..."></textarea></div>
+            <button type="submit" class="action-btn">Generate My Brand-in-a-Box</button>
+        </form>
+    `;
+}
+
 async function renderProjectDetailPage(projectId) {
     try {
         const project = await fetchFromApi(`/project/${projectId}`);
-        const managerTag = project.assignedManager ? project.assignedManager.tag : 'Not Assigned';
+        if(project === null) return;
 
+        const managerTag = project.assignedManager ? JSON.parse(project.assignedManager).tag : 'Not Assigned';
         let assetsHtml = 'No assets defined in masterplan.';
         if (project.masterplan && project.masterplan.requiredAssets && project.masterplan.requiredAssets.length > 0) {
             assetsHtml = project.masterplan.requiredAssets.map(asset => {
                 const isCompleted = asset.status === 'Completed';
                 const statusClass = isCompleted ? 'status-completed' : 'status-pending';
                 const statusText = isCompleted ? 'Completed' : 'Pending';
-
                 let contentHtml = '';
                 if (isCompleted && asset.generatedContent) {
-                    if (asset.type === 'copy') {
-                        contentHtml = `<pre class="asset-content">${asset.generatedContent.replace(/</g, "&lt;")}</pre>`;
-                    } else if (asset.type === 'image' && asset.generatedContent.startsWith('http')) {
-                        contentHtml = `<img src="${asset.generatedContent}" alt="${asset.description}" class="asset-image">`;
-                    }
+                    contentHtml = `<pre class="asset-content">${asset.generatedContent.replace(/</g, "&lt;")}</pre>`;
                 }
-
-                return `
-                    <div class="asset-card">
-                        <button class="asset-header" ${!isCompleted ? 'disabled' : ''}>
-                            <span class="asset-title">${asset.description || ''}</span>
-                            <span class="asset-status ${statusClass}">${statusText}</span>
-                        </button>
-                        <div class="asset-body" style="display: none;">
-                            ${contentHtml}
-                        </div>
-                    </div>
-                `;
+                return `<div class="asset-card"><div class="asset-header"><span class="asset-title">${asset.description || ''}</span><span class="asset-status ${statusClass}">${statusText}</span></div></div>`;
             }).join('');
         }
-
-        appDiv.innerHTML = `
-            <p><a href="/">&larr; Back to Project Dashboard</a></p>
-            <h1>${project.name || 'Project'}</h1>
-            <div id="details">
-                <p><strong>ID:</strong> <code>${project.id}</code></p>
-                <p><strong>Status:</strong> ${project.status || 'N/A'}</p>
-                <p><strong>Project Lead:</strong> ${managerTag}</p>
-            </div>
-            <h3>Generated Assets</h3>
-            <div id="assets-container">${assetsHtml}</div>
-        `;
-
-        // Add event listeners for the new accordion-style assets
-        document.querySelectorAll('.asset-header').forEach(header => {
-            header.addEventListener('click', () => {
-                const body = header.nextElementSibling;
-                if (body.style.display === 'block') {
-                    body.style.display = 'none';
-                } else {
-                    body.style.display = 'block';
-                }
-            });
-        });
-
+        appDiv.innerHTML = `<p><a href="/">&larr; Back to Project Dashboard</a></p><h1>${project.name || 'Project'}</h1><div id="details"><p><strong>ID:</strong> <code>${project.id}</code></p><p><strong>Status:</strong> ${project.status || 'N/A'}</p><p><strong>Project Lead:</strong> ${managerTag}</p></div><h3>Assets</h3><div id="assets-container">${assetsHtml}</div>`;
     } catch (error) {
         console.error('Failed to load project details:', error);
         appDiv.innerHTML = `<h2 style="color: red;">Failed to Load Project</h2><p>${error.message}</p>`;
     }
 }
 
-// --- MAIN APPLICATION START ---
+async function handleFormSubmit(event) {
+    const submitBtn = event.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Generating...';
+    try {
+        const result = await fetchFromApi('/projects', {
+            method: 'POST',
+            body: JSON.stringify({
+                projectName: document.getElementById('projectName').value,
+                targetAudience: document.getElementById('targetAudience').value,
+                coreValues: document.getElementById('coreValues').value,
+            })
+        });
+        showNotification(`Project created! ID: ${result.projectId}`, 'success');
+        currentPath = `/project/${result.projectId}`;
+        window.history.pushState({}, '', currentPath);
+        await router();
+    } catch (error) {
+        showNotification(`Failed to create project: ${error.message}`, 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Generate My Brand-in-a-Box';
+    }
+}
+
+// --- THE ROUTER (The brain of the app) ---
+async function router() {
+    appDiv.innerHTML = `<p><i>Loading...</i></p>`;
+    if (!clerk.user) {
+        renderAuthUI(null); // Render sign-in button
+        appDiv.innerHTML = '<h2>Welcome to the Parel Agency Portal.</h2><p>Please sign in to continue.</p>';
+        return;
+    }
+    // If we are here, the user is logged in.
+    if (currentPath.startsWith('/project/')) {
+        await renderProjectDetailPage(currentPath.split('/')[2]);
+    } else if (currentPath === '/new-project') {
+        renderNewProjectForm();
+    } else {
+        await renderProjectListPage();
+    }
+}
+
+// --- APP INITIALIZATION ---
 async function startApp() {
-    await clerk.load();
-
-    clerk.addListener(({ user }) => {
-        if (user) {
-            renderSignedInUI(user);
-            handleRouteChange();
-        } else {
-            renderSignedOutUI();
-        }
+    // 1. Setup persistent event listeners
+    window.addEventListener('popstate', () => {
+        currentPath = window.location.pathname;
+        router();
     });
-
-    // Listen for URL changes to handle navigation in our SPA
-    window.addEventListener('popstate', handleRouteChange);
     document.body.addEventListener('click', e => {
-        // Intercept clicks on local links to prevent full page reloads
-        if (e.target.matches('a') && e.target.href.startsWith(window.location.origin)) {
+        const anchor = e.target.closest('a');
+        if (anchor && anchor.getAttribute('href')?.startsWith('/')) {
             e.preventDefault();
-            window.history.pushState({}, '', e.target.href);
-            handleRouteChange();
+            currentPath = anchor.getAttribute('href');
+            window.history.pushState({}, '', currentPath);
+            router();
+        }
+        if (!document.getElementById('user-menu-container')?.contains(e.target)) {
+            document.getElementById('user-menu-dropdown')?.setAttribute('style', 'display: none;');
         }
     });
+    appDiv.addEventListener('submit', e => {
+        if (e.target && e.target.id === 'new-project-form') {
+            e.preventDefault();
+            handleFormSubmit(e);
+        }
+    });
+
+    // 2. Setup the Clerk listener to handle auth changes
+    clerk.addListener(({ user }) => {
+        renderAuthUI(user); // Update the Sign In/Out button
+        currentPath = window.location.pathname; // Ensure path is current
+        router(); // Re-render the main content based on new auth state
+    });
+
+    // 3. Initial load
+    await clerk.load();
 }
 
 startApp();
