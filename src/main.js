@@ -1,5 +1,7 @@
 import './style.css';
 import { Clerk } from '@clerk/clerk-js';
+const DISCORD_CLIENT_ID = import.meta.env.VITE_DISCORD_CLIENT_ID;
+const DISCORD_REDIRECT_URI = import.meta.env.VITE_DISCORD_REDIRECT_URI;
 
 // --- NOTIFICATION SYSTEM ---
 function showNotification(message, type = 'success') {
@@ -60,22 +62,33 @@ async function fetchFromApi(endpoint, options = {}) {
 }
 
 // --- UI & PAGE RENDERERS ---
-function renderAuthUI(user) {
+async function renderAuthUI(user) {
     if (user) {
+        const linkStatus = await fetchFromApi('/auth/discord-link-status');
+        const isDiscordLinked = linkStatus ? linkStatus.isLinked : false;
+
+        let dropdownItems = `<button id="profile-btn">Manage Account</button>`;
+        if (!isDiscordLinked) {
+            dropdownItems += `<button id="discord-link-btn" class="action-btn">Connect Discord</button>`;
+        }
+        dropdownItems += `<button id="signout-btn">Sign Out</button>`;
+
         authDiv.innerHTML = `
             <div id="user-menu-container">
                 <button id="user-menu-button"><img src="${user.imageUrl}" alt="${user.fullName || 'User menu'}"></button>
-                <div id="user-menu-dropdown" style="display: none;">
-                    <button id="profile-btn">Manage Account</button>
-                    <button id="signout-btn">Sign Out</button>
-                </div>
+                <div id="user-menu-dropdown" style="display: none;">${dropdownItems}</div>
             </div>`;
-        document.getElementById('user-menu-button').addEventListener('click', (e) => {
-            e.stopPropagation();
-            document.getElementById('user-menu-dropdown').style.display = 'block';
-        });
+
+        document.getElementById('user-menu-button').addEventListener('click', (e) => { e.stopPropagation(); document.getElementById('user-menu-dropdown').style.display = 'block'; });
         document.getElementById('profile-btn').addEventListener('click', () => clerk.openUserProfile());
         document.getElementById('signout-btn').addEventListener('click', () => clerk.signOut());
+
+        if (!isDiscordLinked) {
+            document.getElementById('discord-link-btn').addEventListener('click', () => {
+                const discordAuthUrl = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&scope=identify`;
+                window.location.href = discordAuthUrl;
+            });
+        }
     } else {
         authDiv.innerHTML = `<button id="signin-btn" class="action-btn">Sign In</button>`;
         document.getElementById('signin-btn').addEventListener('click', () => clerk.openSignIn());
