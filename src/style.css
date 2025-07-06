@@ -1,12 +1,13 @@
 :root {
-  --background: #101010;
+  --background: #121212;
   --surface: #1e1e1e;
   --primary: #bb86fc;
   --secondary: #03dac6;
   --text-main: #e0e0e0;
   --text-secondary: #a0a0a0;
-  --border: #2c2c2c;
-  --error: #cf6679;
+  --border: #333333;
+  --success: #4CAF50;
+  --pending: #FFC107;
 }
 
 body {
@@ -52,10 +53,10 @@ h1, h2, h3 {
   font-weight: 700;
   border-bottom: 1px solid var(--border);
   padding-bottom: 0.5rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 }
 
-a { color: var(--primary); text-decoration: none; }
+a { color: var(--primary); text-decoration: none; font-weight: 500; }
 a:hover { text-decoration: underline; }
 
 /* Page Header */
@@ -93,28 +94,84 @@ a:hover { text-decoration: underline; }
 .project-card:hover { box-shadow: 0 0 15px rgba(187, 134, 252, 0.1); }
 .project-card-title { font-size: 1.2rem; margin: 0; padding: 0; border: none; }
 
-/* Form Styling */
-.form-group {
-  margin-bottom: 1.5rem;
-}
-.form-group label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-.form-group input, .form-group textarea {
-  width: 100%;
-  padding: 12px;
-  background-color: var(--background);
+/* --- NEW ASSET ACCORDION STYLING --- */
+.asset-card {
+  background-color: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text-main);
-  font-size: 1rem;
+  border-radius: 8px;
+  margin-bottom: 15px;
+  overflow: hidden; /* Important for the border-radius on children */
 }
-.form-group textarea {
-  resize: vertical;
-  min-height: 100px;
+
+.asset-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  cursor: pointer;
+  width: 100%;
+  background-color: var(--surface);
+  border: none; /* Buttons have default borders we need to remove */
+  border-bottom: 1px solid var(--border); /* Add a separator line */
+  text-align: left;
+  transition: background-color 0.2s ease;
+}
+
+.asset-header:last-of-type {
+  border-bottom: none;
+}
+
+.asset-header:not(:disabled):hover {
+  background-color: #2a2a2a;
+}
+.asset-header:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.asset-title {
+  font-size: 1.1em;
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+.asset-status {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.8em;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.status-completed {
+  background-color: var(--success);
+  color: #fff;
+}
+
+.status-pending {
+  background-color: var(--pending);
+  color: #000;
+}
+
+.asset-body {
+  padding: 20px;
+  background-color: var(--background); /* Slightly different background for content */
+}
+
+.asset-content {
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+  background-color: #0c0c0c;
+  padding: 15px;
+  border-radius: 5px;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.asset-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin-top: 10px;
 }
 
 /* User Menu Styling */

@@ -85,8 +85,13 @@ async function renderAuthUI(user) {
 
         if (!isDiscordLinked) {
             document.getElementById('discord-link-btn').addEventListener('click', () => {
-                const discordAuthUrl = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&scope=identify`;
-                window.location.href = discordAuthUrl;
+                // Clerk's native function to link an account
+                const redirectUrl = window.location.href; // We komen hier terug na de flow
+                clerk.user.createExternalAccount({
+                    strategy: 'oauth_discord',
+                    redirectUrl: redirectUrl,
+                    additionalScopes: [],
+                });
             });
         }
     } else {
@@ -142,44 +147,97 @@ async function renderProjectDetailPage(projectId) {
         if(project === null) return;
 
         const managerTag = project.assignedManager ? JSON.parse(project.assignedManager).tag : 'Not Assigned';
+
         let assetsHtml = 'No assets defined in masterplan.';
         if (project.masterplan && project.masterplan.requiredAssets && project.masterplan.requiredAssets.length > 0) {
-            assetsHtml = project.masterplan.requiredAssets.map(asset => {
+            assetsHtml = project.masterplan.requiredAssets.map((asset, index) => {
                 const isCompleted = asset.status === 'Completed';
                 const statusClass = isCompleted ? 'status-completed' : 'status-pending';
                 const statusText = isCompleted ? 'Completed' : 'Pending';
+
                 let contentHtml = '';
                 if (isCompleted && asset.generatedContent) {
-                    contentHtml = `<pre class="asset-content">${asset.generatedContent.replace(/</g, "&lt;")}</pre>`;
+                    if (asset.type === 'copy') {
+                        contentHtml = `<pre class="asset-content">${asset.generatedContent.replace(/</g, "&lt;")}</pre>`;
+                    } else if (asset.type === 'image' && asset.generatedContent.startsWith('http')) {
+                        contentHtml = `<img src="${asset.generatedContent}" alt="${asset.description}" class="asset-image">`;
+                    }
                 }
-                return `<div class="asset-card"><div class="asset-header"><span class="asset-title">${asset.description || ''}</span><span class="asset-status ${statusClass}">${statusText}</span></div></div>`;
+
+                return `
+                    <div class="asset-card">
+                        <button class="asset-header" data-target="asset-body-${index}" ${isCompleted ? '' : 'disabled'}>
+                            <span class="asset-title">${asset.description || ''}</span>
+                            <span class="asset-status ${statusClass}">${statusText}</span>
+                        </button>
+                        <div id="asset-body-${index}" class="asset-body" style="display: none;">
+                            ${contentHtml}
+                        </div>
+                    </div>
+                `;
             }).join('');
         }
-        appDiv.innerHTML = `<p><a href="/">&larr; Back to Project Dashboard</a></p><h1>${project.name || 'Project'}</h1><div id="details"><p><strong>ID:</strong> <code>${project.id}</code></p><p><strong>Status:</strong> ${project.status || 'N/A'}</p><p><strong>Project Lead:</strong> ${managerTag}</p></div><h3>Assets</h3><div id="assets-container">${assetsHtml}</div>`;
+
+        appDiv.innerHTML = `
+            <p><a href="/">&larr; Back to Project Dashboard</a></p>
+            <h1>${project.name || 'Project'}</h1>
+            <div id="details"><p><strong>ID:</strong> <code>${project.id}</code></p><p><strong>Status:</strong> ${project.status || 'N/A'}</p><p><strong>Project Lead:</strong> ${managerTag}</p></div>
+            <h3>Generated Assets</h3>
+            <div id="assets-container">${assetsHtml}</div>
+        `;
+
+        // Add event listeners for the new accordion-style assets
+        document.querySelectorAll('.asset-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const body = header.nextElementSibling;
+                if (body) {
+                    body.style.display = body.style.display === 'block' ? 'none' : 'block';
+                }
+            });
+        });
+
     } catch (error) {
         console.error('Failed to load project details:', error);
         appDiv.innerHTML = `<h2 style="color: red;">Failed to Load Project</h2><p>${error.message}</p>`;
     }
 }
 
+// In client-portal/main.js
 async function handleFormSubmit(event) {
+    event.preventDefault();
     const submitBtn = event.target.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
     submitBtn.textContent = 'Generating...';
+
     try {
+        const projectData = {
+            projectName: document.getElementById('projectName').value,
+            targetAudience: document.getElementById('targetAudience').value,
+            coreValues: document.getElementById('coreValues').value,
+        };
+
+        // fetchFromApi will throw an error if the response is not OK
         const result = await fetchFromApi('/projects', {
             method: 'POST',
-            body: JSON.stringify({
-                projectName: document.getElementById('projectName').value,
-                targetAudience: document.getElementById('targetAudience').value,
-                coreValues: document.getElementById('coreValues').value,
-            })
+            body: JSON.stringify(projectData)
         });
-        showNotification(`Project created! ID: ${result.projectId}`, 'success');
-        currentPath = `/project/${result.projectId}`;
-        window.history.pushState({}, '', currentPath);
-        await router();
+
+        // --- DEFENSIVE CHECK ---
+        // This code only runs if the API call was successful
+        if (result && result.projectId) {
+            showNotification(`Project created successfully! The Parels will now generate a masterplan.`, 'success');
+            setTimeout(() => {
+                currentPath = `/project/${result.projectId}`;
+                window.history.pushState({}, '', currentPath);
+                router();
+            }, 1500);
+        } else {
+            // This case handles if the API returns a success status but an unexpected body
+            throw new Error("Received an invalid response from the server.");
+        }
+
     } catch (error) {
+        // The fetchFromApi helper or our own logic threw an error
         showNotification(`Failed to create project: ${error.message}`, 'error');
         submitBtn.disabled = false;
         submitBtn.textContent = 'Generate My Brand-in-a-Box';
